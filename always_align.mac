@@ -1,0 +1,238 @@
+/*
+code aligment(VisualStudioのプラグイン)を秀丸エディタへ移植。
+
+＊進捗
+途中まで作成して放置中です。
+
+＊codealigmentのwebサイト
+http://www.codealignment.com/
+*/
+
+//endmacro;
+
+message str(event);
+if(event!=5){
+	endmacro;
+}
+//message str(geteventparam(5));
+if(! ((geteventparam(0)==0) && (geteventparam(1)==0))){
+	endmacro;
+}
+
+$g_insert_char="";
+
+#g_mode_insert=0;
+#g_mode_delete=1;
+#g_mode_backspace=2;
+#g_mode=false;
+
+if(geteventparam(5)==0){
+	/*削除ではない編集*/
+	#g_column_offset = -1;
+	call GetInsertChar;
+	$g_insert_char = $$return;
+	#g_mode=#g_mode_insert;
+}else if(geteventparam(5)==1){
+	/*通常の削除(DEL)
+	*/
+	#g_column_offset = 1;
+	#g_mode=#g_mode_delete;
+}else  if(geteventparam(5)==2){
+	/*BackSpace
+	カーソル位置が動く。
+	*/
+	#g_column_offset = 1;
+	#g_mode=#g_mode_backspace;
+}else  if(geteventparam(5)==3){
+	endmacro;
+}else  if(geteventparam(5)==4){
+	endmacro;
+}else  if(geteventparam(5)==5){
+	endmacro;
+}else  if(geteventparam(5)==6){
+	endmacro;
+}else  if(geteventparam(5)==7){
+	endmacro;
+}else  if(geteventparam(5)==8){
+	endmacro;
+}else {
+	endmacro;
+}
+
+
+/*アライメントを維持する文字を登録する。*/
+#g_align_char_num=0;
+
+$g_align_char[#g_align_char_num] = "=";
+#g_align_char_num=#g_align_char_num+1;
+$g_align_char[#g_align_char_num] = ";";
+#g_align_char_num=#g_align_char_num+1;
+
+/*$g_align_char[] 中の文字を探す正規表現*/
+$g_regex_align="[=;]";
+
+
+/****************************************************************************
+処理開始
+****************************************************************************/
+call Main;
+endmacro;
+
+
+/****************************************************************************
+メイン処理
+****************************************************************************/
+Main:
+	##old_column=column;
+	##old_lineno=lineno;
+
+	call FindStartPos;
+	##str = ##return;
+	if(##str != 0){
+		/*memo
+		
+		編集前
+			=123;
+			=456;
+			=789;
+		編集後（aを挿入）
+			=123;
+			a=456;
+			=789;
+		
+		現在のカーソルをaの位置にするためオフセットを加算。
+		*/
+		moveto2 column+#g_column_offset, ##old_lineno;
+		begingroupundo;
+		call Proc ##str;
+		endgroupundo;
+	}
+	
+	moveto2 ##old_column, ##old_lineno;
+	return ;
+
+/*整形したい文字をカーソルの後ろから探す。
+返値：見付けた文字コード
+	  見つからないときは 0 を返す。
+
+（備考）
+カーソル位置は見つけた文字の位置になる。
+*/
+FindStartPos:
+	call ContainChar unichar(unicode);
+	if(##return){
+		return unicode;
+	}
+		
+	##old_column=column;
+	##old_lineno=lineno;
+	beginsel;
+	
+	golineend2;
+	endsel:
+	searchdown $g_regex_align,regular,inselect,nohilight;
+	if(result){
+		##ret=unicode;
+	}else{
+		##ret=0;
+	}	
+	return ##ret;
+
+	
+Proc:
+	##align_str = ##1;
+	##old_column=column;
+	##old_lineno=lineno;
+	
+	call ProcUp ##align_str;
+	moveto2 ##old_column, ##old_lineno;
+
+	call ProcDown ##align_str;
+	moveto2 ##old_column, ##old_lineno;
+	
+	return;
+
+
+/*上方向に調べる*/
+ProcUp:
+	##align_str=##1;
+	up;
+	while(result != false){	
+		if(unicode != ##align_str){
+			return ;
+		}
+		if(#g_mode==#g_mode_insert){
+			insertfix $g_insert_char;
+		}else{
+			call ProcRemove;
+		}
+		up;
+	}
+	return;
+
+
+/*下方向に調べる*/
+ProcDown:
+	##align_str=##1;
+	down;
+	while(result != false){	
+		if(unicode != ##align_str){
+			return ;
+		}
+		if(#g_mode==#g_mode_insert){
+			insertfix $g_insert_char;
+		}else{
+			call ProcRemove;
+		}
+		down;
+	}
+	return;
+
+
+ProcRemove:
+	/*空白文字(スペース、制御文字)があれば削除する*/
+	##old_lineno=lineno;
+	left;
+	if(result==false){
+		return ;
+	}
+	if(##old_lineno != lineno){
+		right;
+		return ;
+	}
+	##uni = unicode;	
+	if(0x20 < ##uni){
+		right;
+		return ;
+	}	
+	if(#g_mode==#g_mode_delete){
+		delete;		
+		right;
+	}else if(#g_mode==#g_mode_backspace){
+		right;
+		backspace;
+		right;
+	}
+	return;
+
+
+/*整形対象の文字かどうか調べる。
+*/
+ContainChar:
+	$$find_char = $$1;
+	##i=0;
+	while(##i < #g_align_char_num){
+		if($$find_char == $g_align_char[##i]){
+			return true;
+		}
+		##i=##i+1;
+	}
+	return false;
+
+
+GetInsertChar:
+	##c = geteventparam(4);
+	if(##c <= 0x20){
+		return unichar(##c);
+	}
+	return " ";
